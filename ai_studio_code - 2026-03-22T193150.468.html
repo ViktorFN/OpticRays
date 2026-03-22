@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Оптика: Физически корректный GPU Симулятор v5 (Pro UI)</title>
+   
+    <!-- Подключаем Tailwind и современный шрифт Inter -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif;
+            overflow: hidden; 
+            background-color: #030305; /* Глубокий черный с синим отливом */
+            margin: 0; padding: 0; 
+            touch-action: none; user-select: none; 
+        }
+        .canvas-container { position: relative; width: 100vw; height: 100vh; }
+        
+        #glcanvas { 
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; 
+            filter: blur(1.5px) contrast(1.2) brightness(1.2); 
+            mix-blend-mode: screen;
+        }
+        
+        #uicanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; cursor: default; }
+        
+        /* Стеклянные панели (Glassmorphism) */
+        .glass-panel {
+            background: rgba(15, 15, 20, 0.65);
+            backdrop-filter: blur(24px);
+            -webkit-backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+        }
+
+        /* Кастомные современные ползунки */
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 2px;
+            outline: none;
+            transition: background 0.2s;
+        }
+        input[type="range"]:hover { background: rgba(255, 255, 255, 0.25); }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            background: #ffffff;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+            box-shadow: 0 2px 10px rgba(255,255,255,0.4);
+        }
+
+        /* Стили для кнопок фигур */
+        .shape-btn {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: rgba(255, 255, 255, 0.8);
+            transition: all 0.2s;
+        }
+        .shape-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+            color: #fff;
+            transform: translateY(-1px);
+        }
+        
+        .badge {
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.9);
+            font-family: monospace;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            letter-spacing: 0.5px;
+        }
+    </style>
+</head>
+<body class="text-white">
+    
+    <div class="canvas-container">
+        <canvas id="glcanvas"></canvas>
+        <canvas id="uicanvas"></canvas>
+    </div>
+    
+    <!-- ЛЕВАЯ ПАНЕЛЬ: Основные настройки -->
+    <div class="glass-panel fixed top-6 left-6 p-6 rounded-3xl w-[340px] text-sm select-none z-10 flex flex-col gap-6">
+        
+        <!-- Заголовок -->
+        <div class="flex items-center justify-between">
+            <h2 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-fuchsia-400">
+                Optics<span class="font-light text-white">Ray</span>
+            </h2>
+            <button onclick="resetScene()" class="text-[11px] font-semibold tracking-wide text-gray-400 hover:text-white px-3 py-1.5 rounded-full hover:bg-white/10 transition uppercase">
+                Сброс
+            </button>
+        </div>
+        
+        <!-- Секция: Фигуры -->
+        <div>
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Добавить объект</h3>
+            <div class="grid grid-cols-2 gap-2 text-xs font-medium">
+                <button onclick="addPrism()" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>🔺</span> Призма</button>
+                <button onclick="addRaindrop()" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>💧</span> Капля</button>
+                <button onclick="addLens('convex')" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>🔍</span> Выпуклая</button>
+                <button onclick="addLens('concave')" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>🔎</span> Вогнутая</button>
+                <button onclick="addMirror()" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>🪞</span> Зеркало</button>
+                <button onclick="addPolygon()" class="shape-btn py-2.5 rounded-xl flex items-center justify-center gap-2"><span>🔲</span> Полигон</button>
+            </div>
+        </div>
+        
+        <!-- Секция: Настройки луча -->
+        <div class="pt-2">
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Источник света</h3>
+            
+            <div class="flex bg-black/40 p-1 rounded-lg mb-4 border border-white/5">
+                <button id="btn-color-0" onclick="setLightColor(0)" class="flex-1 py-1.5 rounded-md text-[11px] font-bold transition bg-white/20 text-white shadow-sm">White</button>
+                <button id="btn-color-1" onclick="setLightColor(1)" class="flex-1 py-1.5 rounded-md text-[11px] font-bold transition hover:bg-white/5 text-red-400">Red</button>
+                <button id="btn-color-2" onclick="setLightColor(2)" class="flex-1 py-1.5 rounded-md text-[11px] font-bold transition hover:bg-white/5 text-green-400">Green</button>
+                <button id="btn-color-3" onclick="setLightColor(3)" class="flex-1 py-1.5 rounded-md text-[11px] font-bold transition hover:bg-white/5 text-blue-400">Blue</button>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-gray-300">Угол луча</span>
+                        <span id="angleValue" class="badge">0°</span>
+                    </div>
+                    <input type="range" id="lightAngle" min="-45" max="45" value="0" oninput="updateGlobals()">
+                </div>
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-gray-300">Толщина пучка</span>
+                        <span id="beamValue" class="badge">25</span>
+                    </div>
+                    <input type="range" id="beamWidth" min="1" max="400" value="25" oninput="updateGlobals()">
+                </div>
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-yellow-300/80 font-medium">☀️ Яркость (Интенсивность)</span>
+                        <span id="intensityVal" class="badge !bg-yellow-400/20 !text-yellow-200">x1.0</span>
+                    </div>
+                    <input type="range" id="uiIntensity" min="10" max="500" value="100" oninput="updateGlobals()">
+                </div>
+            </div>
+        </div>
+
+        <!-- Секция: Глобальная среда -->
+        <div class="pt-2 border-t border-white/5">
+            <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Параметры среды</h3>
+            <div class="space-y-4">
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-fuchsia-300/80">Глобальная дисперсия</span>
+                        <span id="dispValue" class="badge !bg-fuchsia-500/20 !text-fuchsia-200">x1.0</span>
+                    </div>
+                    <input type="range" id="uiDispersion" min="0" max="100" value="30" oninput="updateGlobals()">
+                </div>
+                <div>
+                    <div class="flex justify-between items-end mb-2">
+                        <span class="text-xs text-cyan-300/80">Коэфф. преломления воздуха (n)</span>
+                        <span id="envNValue" class="badge !bg-cyan-500/20 !text-cyan-200">1.00</span>
+                    </div>
+                    <input type="range" id="uiEnvN" min="100" max="250" value="100" oninput="updateGlobals()">
+                </div>
+            </div>
+        </div>
+    </div>
+        
+    <!-- ПРАВАЯ ПАНЕЛЬ: Свойства выбранного объекта -->
+    <div id="elementPanel" class="glass-panel fixed top-6 right-6 p-6 rounded-3xl w-[280px] text-sm select-none z-10 transition-all transform translate-x-10 opacity-0 pointer-events-none">
+        <div class="flex justify-between items-center mb-5 pb-3 border-b border-white/10">
+            <h3 class="text-[13px] font-bold text-white tracking-wide">Свойства объекта</h3>
+            <button onclick="deleteSelected()" class="text-red-400 hover:text-red-300 transition bg-red-500/10 hover:bg-red-500/20 p-1.5 rounded-lg" title="Удалить (Del)">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+            </button>
+        </div>
+        <div id="elementControls" class="space-y-4"></div>
+    </div>
+
+    <!-- ВЕРШИННЫЙ ШЕЙДЕР -->
+    <script type="x-shader/x-vertex" id="vertex-shader">#version 300 es
+        precision highp float;
+
+        uniform vec2 u_resolution;
+        uniform vec2 u_lightPos;
+        uniform vec2 u_lightDir;
+        uniform float u_beamWidth;
+        uniform float u_dispersion;
+        uniform float u_envN;
+        uniform float u_baseAlpha; 
+        uniform int u_colorType; 
+        
+        uniform int u_numSegments;
+        // ИСПРАВЛЕНИЕ: Увеличен лимит для невероятной гладкости фигур (128 сегментов линзы)
+        uniform vec4 u_segments[1000]; 
+        uniform vec2 u_segProps[1000];  
+
+        uniform int u_numCircles;
+        uniform vec3 u_circles[10];    
+        uniform vec2 u_circProps[10];  
+
+        out vec3 v_color;
+        out float v_alpha;
+
+        // Качественный хэш для белого света
+        float hash12(vec2 p) {
+            vec3 p3  = fract(vec3(p.xyx) * .1031);
+            p3 += dot(p3, p3.yzx + 33.33);
+            return fract((p3.x + p3.y) * p3.z);
+        }
+
+        vec3 spectralColor(float x) {
+            float r = exp(-pow((x - 0.8) / 0.25, 2.0));
+            float g = exp(-pow((x - 0.5) / 0.25, 2.0));
+            float b = exp(-pow((x - 0.2) / 0.25, 2.0));
+            return vec3(r, g, b);
+        }
+
+        float getIOR(float baseN, float wl, float disp) {
+            if (baseN <= 1.0) return baseN;
+            return baseN + (0.5 - wl) * disp;
+        }
+
+        void checkSegment(vec2 ro, vec2 rd, vec4 seg, float n, float type, inout float minT, inout vec2 bestNormal, inout float bestN, inout float bestType) {
+            vec2 a = seg.xy; vec2 b = seg.zw;
+            vec2 v = b - a; vec2 w = ro - a;
+            float denom = rd.x * v.y - rd.y * v.x;
+            if(abs(denom) < 1e-6) return;
+            float t = (v.x * w.y - v.y * w.x) / denom;
+            float s = (rd.x * w.y - rd.y * w.x) / denom;
+            
+            if(t > 0.1 && t < minT && s >= 0.0 && s <= 1.0) {
+                minT = t; 
+                bestNormal = normalize(vec2(v.y, -v.x)); 
+                bestN = n; bestType = type;
+            }
+        }
+
+        void checkCircle(vec2 ro, vec2 rd, vec3 circ, float n, float type, inout float minT, inout vec2 bestNormal, inout float bestN, inout float bestType) {
+            vec2 c = circ.xy; float r = circ.z; vec2 oc = ro - c;
+            float a = dot(rd, rd); float b = 2.0 * dot(oc, rd); float c_val = dot(oc, oc) - r*r;
+            float disc = b*b - 4.0*a*c_val;
+            if(disc >= 0.0) {
+                float sqrtD = sqrt(disc); float t1 = (-b - sqrtD)/(2.0*a); float t2 = (-b + sqrtD)/(2.0*a);
+                float t = t1 > 0.1 ? t1 : (t2 > 0.1 ? t2 : -1.0);
+                if(t > 0.1 && t < minT) {
+                    minT = t; bestNormal = normalize((ro + rd*t) - c); bestN = n; bestType = type;
+                }
+            }
+        }
+
+        void main() {
+            int id = gl_InstanceID;
+            int step = gl_VertexID;
+            vec2 seed = vec2(float(id), 1.337);
+
+            float rndY = hash12(seed + 1.0);
+            float wl = hash12(seed + 3.0); 
+            
+            if(u_colorType == 1) wl = 0.8;       
+            else if(u_colorType == 2) wl = 0.5;  
+            else if(u_colorType == 3) wl = 0.2; 
+
+            vec3 color = spectralColor(wl);
+
+            vec2 perp = vec2(-u_lightDir.y, u_lightDir.x);
+            vec2 ro = u_lightPos + perp * (rndY - 0.5) * u_beamWidth;
+            vec2 rd = u_lightDir;
+            
+            float currentN = u_envN;
+            float intensity = 1.0;
+
+            for(int i = 0; i < 24; i++) {
+                if(i >= step) break; 
+
+                float minT = 99999.0; vec2 normal = vec2(0.0); float nextN = 1.0; float hitType = 0.0;
+
+                // Увеличен цикл до 1000 для детальных линз
+                for(int j=0; j<1000; j++) {
+                    if(j >= u_numSegments) break;
+                    checkSegment(ro, rd, u_segments[j], u_segProps[j].x, u_segProps[j].y, minT, normal, nextN, hitType);
+                }
+                
+                for(int j=0; j<10; j++) {
+                    if(j >= u_numCircles) break;
+                    checkCircle(ro, rd, u_circles[j], u_circProps[j].x, u_circProps[j].y, minT, normal, nextN, hitType);
+                }
+
+                if(minT > 9999.0) { ro = ro + rd * 2500.0; break; }
+                vec2 hitPos = ro + rd * minT;
+
+                if(hitType == 2.0) { 
+                    if(dot(rd, normal) > 0.0) normal = -normal;
+                    rd = reflect(rd, normal);
+                    intensity *= 0.9; 
+                } else { 
+                    bool entering = dot(rd, normal) < 0.0;
+                    if(!entering) normal = -normal;
+
+                    float n1 = getIOR(currentN, wl, u_dispersion);
+                    float n2 = getIOR(entering ? nextN : u_envN, wl, u_dispersion);
+
+                    float ratio = n1 / n2; float cosI = -dot(rd, normal); float sinT2 = ratio * ratio * (1.0 - cosI * cosI);
+
+                    if(sinT2 > 1.0) {
+                        rd = reflect(rd, normal); 
+                    } else {
+                        float cosT = sqrt(1.0 - sinT2);
+                        float r0 = pow((n1 - n2) / (n1 + n2), 2.0);
+                        float R = r0 + (1.0 - r0) * pow(1.0 - cosI, 5.0);
+                        
+                        seed += hitPos * 0.01;
+                        if(hash12(seed + float(i*13)) < R) rd = reflect(rd, normal); 
+                        else { 
+                            rd = normalize(ratio * rd + (ratio * cosI - cosT) * normal); 
+                            currentN = entering ? nextN : u_envN; 
+                        }
+                    }
+                }
+                ro = hitPos;
+            }
+
+            vec2 clipPos = (ro / u_resolution) * 2.0 - 1.0;
+            clipPos.y = -clipPos.y; 
+            gl_Position = vec4(clipPos, 0.0, 1.0);
+            v_color = color;
+            v_alpha = intensity * u_baseAlpha; 
+        }
+    </script>
+
+    <!-- ФРАГМЕНТНЫЙ ШЕЙДЕР -->
+    <script type="x-shader/x-fragment" id="fragment-shader">#version 300 es
+        precision highp float;
+        in vec3 v_color;
+        in float v_alpha;
+        out vec4 fragColor;
+        void main() { 
+            fragColor = vec4(v_color * v_alpha, 1.0); 
+        }
+    </script>
+
+    <script>
+        const uiCanvas = document.getElementById('uicanvas');
+        const glCanvas = document.getElementById('glcanvas');
+        const ctx = uiCanvas.getContext('2d');
+        const gl = glCanvas.getContext('webgl2', { antialias: false, alpha: false, premultipliedAlpha: false });
+        
+        if(!gl) alert("WebGL 2.0 не поддерживается!");
+
+        let width, height;
+        
+        // Глобальные переменные UI
+        let globalLightColorType = 0; 
+        let globalLightAngle = 0;
+        let globalBeamWidth = 25;
+        let globalDispersionFactor = 0.06; 
+        let globalEnvRefractiveIndex = 1.0;
+        let globalIntensityMult = 1.0;
+        
+        let lightSource = { x: 150, y: 350, dragging: false, initialized: false };
+        let elements =[];
+        let selectedElement = null;
+        let draggingElement = null;
+        let dragOffset = { x: 0, y: 0 };
+        let draggingVertex = null;
+        let hoveredVertex = null;
+
+        function createShader(gl, type, source) {
+            let shader = gl.createShader(type);
+            gl.shaderSource(shader, source.trim()); gl.compileShader(shader);
+            if(!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) { console.error(gl.getShaderInfoLog(shader)); return null; } 
+            return shader;
+        }
+        
+        const vs = createShader(gl, gl.VERTEX_SHADER, document.getElementById('vertex-shader').text);
+        const fs = createShader(gl, gl.FRAGMENT_SHADER, document.getElementById('fragment-shader').text);
+        const program = gl.createProgram();
+        gl.attachShader(program, vs); gl.attachShader(program, fs); gl.linkProgram(program);
+        
+        const uniformLocs = {
+            res: gl.getUniformLocation(program, "u_resolution"), lPos: gl.getUniformLocation(program, "u_lightPos"),
+            lDir: gl.getUniformLocation(program, "u_lightDir"), bWidth: gl.getUniformLocation(program, "u_beamWidth"),
+            disp: gl.getUniformLocation(program, "u_dispersion"), envN: gl.getUniformLocation(program, "u_envN"),
+            bAlpha: gl.getUniformLocation(program, "u_baseAlpha"), cType: gl.getUniformLocation(program, "u_colorType"),
+            nSegs: gl.getUniformLocation(program, "u_numSegments"), segs: gl.getUniformLocation(program, "u_segments"),
+            sProps: gl.getUniformLocation(program, "u_segProps"), nCircs: gl.getUniformLocation(program, "u_numCircles"),
+            circs: gl.getUniformLocation(program, "u_circles"), cProps: gl.getUniformLocation(program, "u_circProps")
+        };
+
+        const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+        
+        function vec(x, y) { return { x, y }; }
+        function vadd(a, b) { return vec(a.x + b.x, a.y + b.y); }
+        function vrot(v, angle) { const c = Math.cos(angle), s = Math.sin(angle); return vec(v.x * c - v.y * s, v.x * s + v.y * c); }
+
+        function addPrism() { elements.push({ type: 'prism', x: width/2, y: height/2, size: 140, rotation: 0, n: 1.52 }); requestRender(); }
+        function addLens(t) { elements.push({ type: 'lens', lensType: t, x: width/2, y: height/2, curvatureRadius: 200, height: 180, thickness: 50, rotation: 0, n: 1.52 }); requestRender(); }
+        function addRaindrop() { elements.push({ type: 'raindrop', x: width/2, y: height/2, radius: 100, n: 1.33 }); requestRender(); }
+        function addMirror() { elements.push({ type: 'mirror', x: width/2, y: height/2, length: 150, rotation: 45 }); requestRender(); }
+        function addPolygon() { elements.push({ type: 'polygon', x: width/2, y: height/2, n: 1.52, rotation: 0, vertices:[ vec(-60, -60), vec(60, -60), vec(60, 60), vec(-60, 60) ] }); requestRender(); }
+
+        function resetScene() {
+            elements =[];
+            document.getElementById('lightAngle').value = 0; document.getElementById('beamWidth').value = 25;
+            document.getElementById('uiDispersion').value = 30; document.getElementById('uiEnvN').value = 100;
+            document.getElementById('uiIntensity').value = 100; 
+            setLightColor(0); updateGlobals();
+            addPrism(); elements[0].x = width * 0.5 + 50; elements[0].y = height * 0.5; elements[0].rotation = 15;
+            lightSource.x = 150; lightSource.y = height * 0.45; 
+            hideElementPanel();
+            requestRender();
+        }
+
+        function getPrismGeometry(p) {
+            const angle = p.rotation * Math.PI / 180; const h = p.size * Math.sqrt(3) / 2;
+            const v =[vec(0, -h*2/3), vec(p.size/2, h/3), vec(-p.size/2, h/3)].map(v => vadd(vec(p.x, p.y), vrot(v, angle)));
+            return [{p1: v[0], p2: v[1]}, {p1: v[1], p2: v[2]}, {p1: v[2], p2: v[0]}];
+        }
+        function getPolygonGeometry(p) {
+            const angle = (p.rotation || 0) * Math.PI / 180;
+            const v = p.vertices.map(pt => vadd(vec(p.x, p.y), vrot(pt, angle)));
+            let edges =[]; for (let i = 0; i < v.length; i++) edges.push({ p1: v[i], p2: v[(i + 1) % v.length] });
+            return edges;
+        }
+
+        function getLensGeometry(lens) {
+            let pts =[]; let R = lens.curvatureRadius; let H = lens.height / 2; let T = lens.thickness; 
+            // ИСПРАВЛЕНИЕ: 128 шагов на сторону = невероятная гладкость линз
+            let steps = 128; 
+            if (lens.lensType === 'convex') {
+                let d = R - Math.sqrt(Math.max(0, R*R - H*H));
+                if (T < 2 * d) { T = Math.min(T, 2 * R); H = Math.sqrt(Math.max(0, R*R - Math.pow(R - T/2, 2))); }
+                let cx_right = T/2 - R; let cx_left = -T/2 + R;
+                for(let i=0; i<=steps; i++) { let y = -H + (2*H)*(i/steps); pts.push(vec(cx_right + Math.sqrt(R*R - y*y), y)); }
+                for(let i=0; i<=steps; i++) { let y = H - (2*H)*(i/steps); pts.push(vec(cx_left - Math.sqrt(R*R - y*y), y)); }
+            } else { 
+                let d = R - Math.sqrt(Math.max(0, R*R - H*H)); let cx_right = T/2 + R; let cx_left = -T/2 - R;
+                for(let i=0; i<=steps; i++) { let y = -H + (2*H)*(i/steps); pts.push(vec(cx_right - Math.sqrt(R*R - y*y), y)); }
+                for(let i=0; i<=steps; i++) { let y = H - (2*H)*(i/steps); pts.push(vec(cx_left + Math.sqrt(R*R - y*y), y)); }
+            }
+            let angle = (lens.rotation || 0) * Math.PI / 180; let edges =[];
+            for(let i=0; i<pts.length; i++) pts[i] = vadd(vec(lens.x, lens.y), vrot(pts[i], angle));
+            for(let i=0; i<pts.length; i++) {
+                let p1 = pts[i], p2 = pts[(i+1)%pts.length];
+                if (Math.hypot(p1.x - p2.x, p1.y - p2.y) > 0.1) edges.push({p1: p1, p2: p2});
+            }
+            return edges;
+        }
+
+        let renderRequested = false;
+        function requestRender() {
+            if (!renderRequested) { renderRequested = true; requestAnimationFrame(() => { renderGPU(); renderUI(); renderRequested = false; }); }
+        }
+
+        function resize() {
+            const dpr = window.devicePixelRatio || 1;
+            width = window.innerWidth; height = window.innerHeight;
+            
+            uiCanvas.width = width * dpr; uiCanvas.height = height * dpr;
+            glCanvas.width = width * dpr; glCanvas.height = height * dpr;
+            
+            ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.scale(dpr, dpr);
+            gl.viewport(0, 0, glCanvas.width, glCanvas.height);
+            
+            if (!lightSource.initialized) { lightSource.y = height / 2; lightSource.initialized = true; }
+            requestRender();
+        }
+        window.addEventListener('resize', resize);
+
+        function renderGPU() {
+            if (!gl) return;
+            gl.clearColor(0.0, 0.0, 0.0, 1.0); gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE);
+            gl.useProgram(program);
+            
+            gl.uniform2f(uniformLocs.res, width, height); 
+            gl.uniform2f(uniformLocs.lPos, lightSource.x, lightSource.y);
+            
+            const rad = globalLightAngle * Math.PI / 180;
+            gl.uniform2f(uniformLocs.lDir, Math.cos(rad), Math.sin(rad));
+            gl.uniform1f(uniformLocs.bWidth, globalBeamWidth); 
+            gl.uniform1f(uniformLocs.disp, globalDispersionFactor);
+            gl.uniform1f(uniformLocs.envN, globalEnvRefractiveIndex); 
+            gl.uniform1i(uniformLocs.cType, globalLightColorType);
+
+            // ИСПРАВЛЕНИЕ: Удвоено количество лучей (60 000) для идеальной плотности
+            const TOTAL_RAYS = 60000;
+            let density = TOTAL_RAYS / Math.max(globalBeamWidth, 1.0);
+            let targetAlpha = Math.max(1.5 / density, 0.0015) * globalIntensityMult; 
+            gl.uniform1f(uniformLocs.bAlpha, targetAlpha);
+
+            // ИСПРАВЛЕНИЕ: Буферы увеличены до 1000 для детальных гладких линз
+            let segData = new Float32Array(1000 * 4); let sPropData = new Float32Array(1000 * 2);
+            let circData = new Float32Array(10 * 3); let cPropData = new Float32Array(10 * 2);
+            let sCount = 0, cCount = 0;
+
+            for(let e of elements) {
+                if(e.type === 'raindrop' && cCount < 10) {
+                    circData[cCount*3] = e.x; circData[cCount*3+1] = e.y; circData[cCount*3+2] = e.radius;
+                    cPropData[cCount*2] = e.n; cPropData[cCount*2+1] = 1.0; cCount++;
+                } else {
+                    let edges =[];
+                    if(e.type === 'prism') edges = getPrismGeometry(e);
+                    else if(e.type === 'polygon') edges = getPolygonGeometry(e);
+                    else if(e.type === 'lens') edges = getLensGeometry(e);
+                    else if(e.type === 'mirror') { const rRad = e.rotation * Math.PI / 180; edges =[{ p1: vadd(vec(e.x, e.y), vrot(vec(-e.length/2, 0), rRad)), p2: vadd(vec(e.x, e.y), vrot(vec(e.length/2, 0), rRad)) }]; }
+
+                    for(let edge of edges) {
+                        if(sCount >= 1000) break;
+                        segData[sCount*4] = edge.p1.x; segData[sCount*4+1] = edge.p1.y; segData[sCount*4+2] = edge.p2.x; segData[sCount*4+3] = edge.p2.y;
+                        sPropData[sCount*2] = e.type==='mirror' ? 1.0 : e.n; sPropData[sCount*2+1] = e.type==='mirror' ? 2.0 : 1.0;
+                        sCount++;
+                    }
+                }
+            }
+
+            gl.uniform1i(uniformLocs.nSegs, sCount); if(sCount > 0) { gl.uniform4fv(uniformLocs.segs, segData); gl.uniform2fv(uniformLocs.sProps, sPropData); }
+            gl.uniform1i(uniformLocs.nCircs, cCount); if(cCount > 0) { gl.uniform3fv(uniformLocs.circs, circData); gl.uniform2fv(uniformLocs.cProps, cPropData); }
+
+            gl.bindVertexArray(vao);
+            gl.drawArraysInstanced(gl.LINE_STRIP, 0, 24, TOTAL_RAYS);
+        }
+
+        function renderUI() {
+            ctx.clearRect(0, 0, width, height);
+            
+            // ИСПРАВЛЕНИЕ: Современная точечная сетка (Grid)
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.04)';
+            for (let x=0; x<width; x+=40) {
+                for (let y=0; y<height; y+=40) {
+                    ctx.beginPath();
+                    ctx.arc(x, y, 1.5, 0, Math.PI*2);
+                    ctx.fill();
+                }
+            }
+
+            elements.forEach((elem, index) => {
+                const sel = index === selectedElement;
+                if (elem.type === 'prism') drawPrism(elem, sel); else if (elem.type === 'polygon') drawPolygon(elem, sel, index);
+                else if (elem.type === 'lens') drawLens(elem, sel); else if (elem.type === 'raindrop') drawRaindrop(elem, sel);
+                else if (elem.type === 'mirror') drawMirror(elem, sel);
+            });
+            drawLightSourceUI();
+        }
+
+        function drawLightSourceUI() { const { x, y } = lightSource; ctx.fillStyle = 'rgba(255, 255, 255, 0.05)'; ctx.beginPath(); ctx.arc(x, y, 40, 0, Math.PI*2); ctx.fill(); ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI*2); ctx.fill(); ctx.shadowBlur = 15; ctx.shadowColor = '#fff'; ctx.fill(); ctx.shadowBlur = 0; }
+        
+        function applyGlassStyle(selected, mainColor) { 
+            ctx.shadowBlur = selected ? 15 : 0; 
+            ctx.shadowColor = mainColor; 
+            ctx.strokeStyle = selected ? '#fff' : mainColor; 
+            ctx.lineWidth = selected ? 1.5 : 1; 
+        }
+
+        function drawPolygon(poly, selected, elemIndex) {
+            const edges = getPolygonGeometry(poly); if(edges.length < 3) return;
+            ctx.save(); ctx.beginPath(); ctx.moveTo(edges[0].p1.x, edges[0].p1.y); for(let i=0; i<edges.length; i++) ctx.lineTo(edges[i].p2.x, edges[i].p2.y);
+            ctx.fillStyle = 'rgba(34, 197, 94, 0.05)'; ctx.fill(); applyGlassStyle(selected, '#22c55e'); ctx.stroke();
+            if(selected) { ctx.shadowBlur = 0; edges.forEach((e, i) => { const hov = hoveredVertex && hoveredVertex.elemIdx === elemIndex && hoveredVertex.vIdx === i; ctx.fillStyle = hov ? '#fff' : '#22c55e'; ctx.beginPath(); ctx.arc(e.p1.x, e.p1.y, hov ? 6 : 4, 0, Math.PI*2); ctx.fill(); }); } ctx.restore();
+        }
+
+        function drawRaindrop(d, s) { ctx.save(); ctx.beginPath(); ctx.arc(d.x, d.y, d.radius, 0, Math.PI*2); ctx.fillStyle = 'rgba(2,132,199,0.05)'; ctx.fill(); applyGlassStyle(s, '#0ea5e9'); ctx.stroke(); ctx.restore(); }
+        function drawPrism(p, s) { const edges = getPrismGeometry(p); ctx.save(); ctx.beginPath(); ctx.moveTo(edges[0].p1.x, edges[0].p1.y); for(let e of edges) ctx.lineTo(e.p2.x, e.p2.y); ctx.fillStyle = 'rgba(139, 92, 246, 0.05)'; ctx.fill(); applyGlassStyle(s, '#8b5cf6'); ctx.stroke(); ctx.restore(); }
+        function drawLens(lens, s) { const edges = getLensGeometry(lens); if(!edges.length) return; ctx.save(); ctx.beginPath(); ctx.moveTo(edges[0].p1.x, edges[0].p1.y); for(let i=1; i<edges.length; i++) ctx.lineTo(edges[i].p1.x, edges[i].p1.y); ctx.closePath(); ctx.fillStyle = 'rgba(34, 211, 238, 0.05)'; ctx.fill(); applyGlassStyle(s, '#06b6d4'); ctx.stroke(); ctx.restore(); }
+        function drawMirror(m, s) { ctx.save(); ctx.translate(m.x, m.y); ctx.rotate(m.rotation*Math.PI/180); ctx.fillStyle='rgba(148,163,184,0.3)'; ctx.fillRect(-m.length/2, -3, m.length, 6); ctx.beginPath(); ctx.moveTo(-m.length/2,0); ctx.lineTo(m.length/2,0); applyGlassStyle(s, '#fff'); ctx.stroke(); ctx.restore(); }
+
+        function setLightColor(t) {[0,1,2,3].forEach(c => document.getElementById(`btn-color-${c}`).classList.remove('bg-white/20', 'text-white')); 
+            document.getElementById(`btn-color-${t}`).classList.add('bg-white/20', 'text-white'); 
+            globalLightColorType = t; 
+            requestRender(); 
+        } 
+        
+        function updateGlobals() { 
+            globalLightAngle = parseFloat(document.getElementById('lightAngle').value); 
+            document.getElementById('angleValue').textContent = globalLightAngle + '°'; 
+            
+            globalBeamWidth = parseInt(document.getElementById('beamWidth').value); 
+            document.getElementById('beamValue').textContent = globalBeamWidth; 
+            
+            globalDispersionFactor = parseInt(document.getElementById('uiDispersion').value) / 500.0; 
+            document.getElementById('dispValue').textContent = 'x' + (globalDispersionFactor * 50).toFixed(1);
+            
+            globalEnvRefractiveIndex = parseInt(document.getElementById('uiEnvN').value) / 100.0; 
+            document.getElementById('envNValue').textContent = globalEnvRefractiveIndex.toFixed(2);
+            
+            globalIntensityMult = parseInt(document.getElementById('uiIntensity').value) / 100.0; 
+            document.getElementById('intensityVal').textContent = 'x' + globalIntensityMult.toFixed(1);
+            
+            requestRender(); 
+        }
+
+        function hideElementPanel() {
+            const p = document.getElementById('elementPanel');
+            p.classList.remove('translate-x-0', 'opacity-100', 'pointer-events-auto');
+            p.classList.add('translate-x-10', 'opacity-0', 'pointer-events-none');
+        }
+
+        function deleteSelected() { 
+            if(selectedElement !== null) { 
+                elements.splice(selectedElement,1); 
+                selectedElement = null; 
+                hideElementPanel();
+                requestRender(); 
+            } 
+        }
+        window.addEventListener('keydown', e => { if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected(); });
+
+        function showElementPanel(e) { 
+            const p = document.getElementById('elementPanel'); 
+            // Плавное появление панели справа
+            p.classList.remove('translate-x-10', 'opacity-0', 'pointer-events-none');
+            p.classList.add('translate-x-0', 'opacity-100', 'pointer-events-auto');
+            
+            const c = document.getElementById('elementControls');
+            let h = ''; 
+            const s = (l, pr, mn, mx, sc=1) => {
+                let displayVal = sc === 100 ? (e[pr]).toFixed(2) : (e[pr] * sc).toFixed(0);
+                return `<div>
+                            <div class="flex justify-between items-end mb-2">
+                                <span class="text-xs text-gray-300">${l}</span>
+                                <span id="val_${pr}" class="badge">${displayVal}</span>
+                            </div>
+                            <input type="range" min="${mn}" max="${mx}" value="${e[pr]*sc}" oninput="updateElementProp('${pr}',this.value,${sc})">
+                        </div>`;
+            };
+            
+            if(e.type==='raindrop') h+=s('Радиус','radius',20,200)+s('Индекс среды (n)','n',100,250,100);
+            else if(e.type==='prism') h+=s('Размер','size',50,400)+s('Индекс среды (n)','n',100,250,100)+s('Поворот','rotation',0,360);
+            else if(e.type==='lens') h+=s('Высота','height',50,400)+s('Кривизна','curvatureRadius',50,600)+s('Толщина','thickness',10,150)+s('Индекс (n)','n',100,250,100)+s('Поворот','rotation',0,360);
+            else if(e.type==='mirror') h+=s('Длина','length',50,400)+s('Поворот','rotation',0,360);
+            else if(e.type==='polygon') h+=s('Индекс среды (n)','n',100,250,100)+s('Поворот','rotation',0,360); 
+            c.innerHTML = h;
+        }
+
+        window.updateElementProp = (p, v, sc) => { 
+            if(selectedElement === null) return; 
+            let actualVal = parseFloat(v) / sc;
+            elements[selectedElement][p] = actualVal; 
+            const valSpan = document.getElementById(`val_${p}`); 
+            if (valSpan) valSpan.textContent = sc === 100 ? actualVal.toFixed(2) : Math.round(v); 
+            requestRender(); 
+        };
+
+        function getElementAt(x, y) { 
+            for(let i=elements.length-1; i>=0; i--) { 
+                const e = elements[i]; 
+                if(e.type === 'polygon') {
+                    const v = p => vadd(vec(e.x, e.y), vrot(p, (e.rotation||0)*Math.PI/180)); let inside = false;
+                    for(let j=0, k=e.vertices.length-1; j<e.vertices.length; k=j++) { const pj = v(e.vertices[j]), pk = v(e.vertices[k]); if (((pj.y > y) !== (pk.y > y)) && (x < (pk.x - pj.x) * (y - pj.y) / (pk.y - pj.y) + pj.x)) inside = !inside; } if (inside) return i;
+                } else {
+                    const d = Math.hypot(x-e.x, y-e.y); let maxDist = 40; if(e.type==='raindrop') maxDist=e.radius; if(e.type==='lens') maxDist=e.height/2; if(e.type==='prism') maxDist=e.size/1.5; if(e.type==='mirror') maxDist=e.length/2; if(d < maxDist) return i; 
+                }
+            } return null; 
+        }
+
+        function checkVertexHover(x, y) { hoveredVertex = null; if (selectedElement !== null && elements[selectedElement].type === 'polygon') { const e = elements[selectedElement]; const angle = (e.rotation||0)*Math.PI/180; for (let i = 0; i < e.vertices.length; i++) { const pt = vadd(vec(e.x, e.y), vrot(e.vertices[i], angle)); if (Math.hypot(x - pt.x, y - pt.y) < 10) { hoveredVertex = { elemIdx: selectedElement, vIdx: i }; return true; } } } return false; }
+        function distToSegment(p, v, w) { const l2 = (v.x - w.x)**2 + (v.y - w.y)**2; if (l2 === 0) return Math.hypot(p.x - v.x, p.y - v.y); let t = ((p.x - v.x) * (w.x - v.x) + (p.y - v.y) * (w.y - v.y)) / l2; t = Math.max(0, Math.min(1, t)); return Math.hypot(p.x - (v.x + t * (w.x - v.x)), p.y - (v.y + t * (w.y - v.y))); }
+
+        uiCanvas.addEventListener('mousemove', e => { 
+            let needsRender = false;
+            if (lightSource.dragging) { lightSource.x = e.clientX; lightSource.y = e.clientY; needsRender = true; }
+            else if (draggingVertex !== null) { elements[draggingVertex.elemIdx].vertices[draggingVertex.vIdx] = vrot(vec(e.clientX - elements[draggingVertex.elemIdx].x, e.clientY - elements[draggingVertex.elemIdx].y), -(elements[draggingVertex.elemIdx].rotation || 0) * Math.PI / 180); needsRender = true; } 
+            else if (draggingElement !== null) { elements[draggingElement].x = e.clientX - dragOffset.x; elements[draggingElement].y = e.clientY - dragOffset.y; needsRender = true; } 
+            else { const oldHover = hoveredVertex; checkVertexHover(e.clientX, e.clientY); if (oldHover !== hoveredVertex) needsRender = true; }
+            uiCanvas.style.cursor = hoveredVertex ? 'crosshair' : (getElementAt(e.clientX, e.clientY) !== null || Math.hypot(e.clientX-lightSource.x, e.clientY-lightSource.y) < 40) ? 'move' : 'default';
+            if (needsRender) requestRender(); 
+        });
+
+        uiCanvas.addEventListener('mousedown', e => { 
+            if (Math.hypot(e.clientX-lightSource.x, e.clientY-lightSource.y) < 40) { lightSource.dragging = true; requestRender(); return; }
+            if (checkVertexHover(e.clientX, e.clientY)) { draggingVertex = hoveredVertex; return; }
+            const idx = getElementAt(e.clientX, e.clientY); 
+            if (idx !== null) { selectedElement = idx; draggingElement = idx; dragOffset = { x: e.clientX - elements[idx].x, y: e.clientY - elements[idx].y }; showElementPanel(elements[idx]); } 
+            else { selectedElement = null; hideElementPanel(); } 
+            requestRender(); 
+        });
+        
+        window.addEventListener('mouseup', () => { lightSource.dragging = false; draggingElement = null; draggingVertex = null; });
+        uiCanvas.addEventListener('wheel', e => { const idx = getElementAt(e.clientX, e.clientY); if(idx !== null && elements[idx].type !== 'raindrop') { e.preventDefault(); elements[idx].rotation = (elements[idx].rotation + (e.deltaY > 0 ? 5 : -5) + 360) % 360; showElementPanel(elements[idx]); requestRender(); } }, {passive:false});
+        uiCanvas.addEventListener('dblclick', e => {
+            if (selectedElement !== null && elements[selectedElement].type === 'polygon') {
+                const poly = elements[selectedElement]; const edges = getPolygonGeometry(poly);
+                for (let i = 0; i < edges.length; i++) { if (Math.hypot(e.clientX - edges[i].p1.x, e.clientY - edges[i].p1.y) < 15) { if (poly.vertices.length > 3) { poly.vertices.splice(i, 1); requestRender(); checkVertexHover(e.clientX, e.clientY); } return; } }
+                const mousePos = vec(e.clientX, e.clientY);
+                for (let i = 0; i < edges.length; i++) { if (distToSegment(mousePos, edges[i].p1, edges[i].p2) < 10) { poly.vertices.splice(i + 1, 0, vrot(vec(e.clientX - poly.x, e.clientY - poly.y), -(poly.rotation || 0) * Math.PI / 180)); requestRender(); return; } }
+            }
+        });
+
+        resize(); resetScene();
+    </script>
+</body>
+</html>
