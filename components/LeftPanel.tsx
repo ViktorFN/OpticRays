@@ -117,14 +117,14 @@ export default function LeftPanel({
           Виртуальная<span className="font-light text-white"> оптика</span>
           <span className="ml-1 font-mono text-[9px] tracking-widest text-emerald-400">версия 1.0</span>
         </h2>
-        <div className="flex gap-0.5">
+        <div className="flex items-center gap-1">
           <button onClick={undo} disabled={!canUndo} className={`rounded-lg p-1 transition-colors ${canUndo ? 'text-white hover:bg-white/10' : 'cursor-not-allowed text-white/20'}`}>
             <Undo2 size={14} />
           </button>
           <button onClick={redo} disabled={!canRedo} className={`rounded-lg p-1 transition-colors ${canRedo ? 'text-white hover:bg-white/10' : 'cursor-not-allowed text-white/20'}`}>
             <Redo2 size={14} />
           </button>
-          <button onClick={onReset} className="ml-0.5 rounded-full px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-400 transition-colors hover:bg-white/10 hover:text-white">
+          <button onClick={onReset} className="rounded-lg px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-red-400 transition-colors hover:bg-red-500/20 hover:text-red-300">
             Сброс
           </button>
         </div>
